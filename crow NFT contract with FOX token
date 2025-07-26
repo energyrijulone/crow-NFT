@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Royalty.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+// Interface for FOX Token (optional, for payment in FOX)
+interface IFOXToken {
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+contract CrowNFT is ERC721Enumerable, ERC721URIStorage, ERC721Royalty, Ownable, Pausable, ReentrancyGuard {
+    using Counters for Counters.Counter;
+    using SafeMath for uint256;
+
+    Counters.Counter private _tokenIdCounter;
+    uint256 public constant MAX_SUPPLY = 10000; // Maximum number of Crow NFTs
+    uint256 public constant MINT_PRICE_ETH = 0.05 ether; // Mint price in ETH
+    uint256 public constant MINT_PRICE_FOX = 1000 * 10**18; // Mint price in FOX (1000 FOX, assuming 18 decimals)
+    uint256 public constant MAX_MINT_PER_TX = 10; // Max NFTs per transaction
+    IFOXToken public foxToken; // FOX Token contract (optional)
+    bool public foxPaymentEnabled; // Toggle for FOX payment
+    string public baseURI; // Base URI for metadata (e.g., ipfs://<hash>/)
+    address public treasury; // Treasury for minting revenue
+
+    // Events
+    event CrowMinted(address indexed minter, uint256 tokenId, string tokenURI);
+    event BaseURIUpdated(string newBaseURI);
+    event FoxPaymentToggled(bool enabled);
+    event TreasuryUpdated(address newTreasury);
+
+    constructor(
+        address _foxToken,
+        address _treasury,
+        string memory _initialBaseURI
+    ) ERC721("CrowNFT", "CROW") Ownable(msg.sender) {
+        foxToken = IFOXToken(_foxToken);
+        treasury = _treasury;
+        baseURI = _initialBaseURI;
+        foxPaymentEnabled = (_foxToken != address(0)); // Enable FOX payment if token address provided
+        // Set default royalty: 5% to treasury
+        _setDefaultRoyalty(treasury, 500); // 500 basis points = 5%
+    }
+
+    // Mint NFTs with ETH
+    function mintWithETH(uint256 _quantity) external payable whenNotPaused nonReentrant {
+        require(_quantity > 0 && _quantity <= MAX_MINT_PER_TX, "Invalid quantity");
+        uint256 newSupply = totalSupply().add(_quantity);
+        require(newSupply <= MAX_SUPPLY, "Exceeds max supply");
+        require(msg.value >= MINT_PRICE_ETH.mul(_quantity), "Insufficient ETH");
+
+        for (uint256 i = 0; i < _quantity; i++) {
+            _mintSingle(msg.sender);
+        }
+
+        // Send ETH to treasury
+        (bool sent, ) = treasury.call{value: msg.value}("");
+        require(sent, "ETH transfer to treasury failed");
+    }
+
+    // Mint NFTs with FOX (if enabled)
+    function mintWithFOX(uint256 _quantity) external whenNotPaused nonReentrant {
+        require(foxPaymentEnabled, "FOX payment not enabled");
+        require(_quantity > 0 && _quantity <= MAX_MINT_PER_TX, "Invalid quantity");
+        uint256 newSupply = totalSupply().add(_quantity);
+        require(newSupply <= MAX_SUPPLY, "Exceeds max supply");
+        uint256 totalCost = MINT_PRICE_FOX.mul(_quantity);
+        require(foxToken.balanceOf(msg.sender) >= totalCost, "Insufficient FOX balance");
+        require(foxToken.transferFrom(msg.sender, treasury, totalCost), "FOX transfer failed");
+
+        for (uint256 i = 0; i < _quantity; i++) {
+            _mintSingle(msg.sender);
+        }
+    }
+
+    // Internal minting function
+    function _mintSingle(address _to) private {
+        _tokenIdCounter.increment();
+        uint256 tokenId = _tokenIdCounter.current();
+        _safeMint(_to, tokenId);
+        _setTokenURI(tokenId, _generateTokenURI(tokenId));
+        emit CrowMinted(_to, tokenId, tokenURI(tokenId));
+    }
+
+    // Generate token URI (concatenates baseURI with tokenId)
+    function _generateTokenURI(uint256 _tokenId) private view returns (string memory) {
+        return string(abi.encodePacked(baseURI, _toString(_tokenId), ".json"));
+    }
+
+    // Convert uint to string (for token URI)
+    function _toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
+        }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
+    }
+
+    // Get voting power for governance (1 NFT = 1 vote)
+    function governanceVotingPower(address _account) external view returns (uint256) {
+        return balanceOf(_account);
+    }
+
+    // Update base URI (only owner)
+    function setBaseURI(string memory _newBaseURI) external onlyOwner {
+        baseURI = _newBaseURI;
+        emit BaseURIUpdated(_newBaseURI);
+    }
+
+    // Toggle FOX payment (only owner)
+    function setFoxPaymentEnabled(bool _enabled) external onlyOwner {
+        foxPaymentEnabled = _enabled;
+        emit FoxPaymentToggled(_enabled);
+    }
+
+    // Update treasury address (only owner)
+    function setTreasury(address _newTreasury) external onlyOwner {
+        require(_newTreasury != address(0), "Invalid treasury address");
+        treasury = _newTreasury;
+        _setDefaultRoyalty(treasury, 500); // Update royalty receiver
+        emit TreasuryUpdated(_newTreasury);
+    }
+
+    // Pause contract (only owner)
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    // Unpause contract (only owner)
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    // Override required ERC-721 and ERC-2981 functions
+    function _burn(uint256 tokenId) internal override(ERC721, ERC721URIStorage) {
+        super._burn(tokenId);
+    }
+
+    function tokenURI(uint256 tokenId) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+        return super.tokenURI(tokenId);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721, ERC721Enumerable, ERC721Royalty)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    // Required override for ERC721Enumerable
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize)
+        internal
+        override(ERC721, ERC721Enumerable)
+    {
+        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+    }
+}
