@@ -1,0 +1,30 @@
+// Deploy contract
+const CrowNFT = await ethers.getContractFactory("CrowNFT");
+const crowNFT = await CrowNFT.deploy(
+    "0xc770eefad204b5180df6a14ee197d99d808ee52d", // FOX Token
+    "0x<treasury-address>", // Treasury
+    "ipfs://<base-hash>/"
+);
+await crowNFT.deployed();
+
+// Mint with ETH
+await crowNFT.mintWithETH(2, { value: ethers.utils.parseEther("0.1") });
+
+// Mint with FOX
+await foxToken.approve(crowNFT.address, ethers.utils.parseEther("2000"));
+await crowNFT.mintWithFOX(2);
+
+// Check voting power
+const votingPower = await crowNFT.governanceVotingPower(userAddress);
+
+{
+  "name": "Crow #1",
+  "description": "A majestic crow NFT from the CrowNFT collection.",
+  "image": "ipfs://<image-hash>/crow1.png",
+  "attributes": [
+    { "trait_type": "Feather Color", "value": "Black" },
+    { "trait_type": "Rarity", "value": "Common" },
+    { "trait_type": "Eye Color", "value": "Yellow" }
+  ]
+}
+
