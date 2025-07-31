@@ -17,14 +17,4 @@ await crowNFT.mintWithFOX(2);
 // Check voting power
 const votingPower = await crowNFT.governanceVotingPower(userAddress);
 
-{
-  "name": "Crow #1",
-  "description": "A majestic crow NFT from the CrowNFT collection.",
-  "image": "ipfs://<image-hash>/crow1.png",
-  "attributes": [
-    { "trait_type": "Feather Color", "value": "Black" },
-    { "trait_type": "Rarity", "value": "Common" },
-    { "trait_type": "Eye Color", "value": "Yellow" }
-  ]
-}
 
