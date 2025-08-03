@@ -1,0 +1,3 @@
+
+// Check voting power
+const votingPower = await crowNFT.governanceVotingPower(userAddress);
